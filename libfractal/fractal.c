@@ -1,6 +1,6 @@
 #include <stdlib.h>
 #include "fractal.h"
-
+#include <string.h>
 struct fractal *fractal_new(const char *name, int width, int height, double a, double b)
 {
 
@@ -13,7 +13,7 @@ struct fractal *fractal_new(const char *name, int width, int height, double a, d
 
    }
 
-     fract->name = name; //Checker si bonne taille?
+     strcpy(fract->name,name);
 
      fract->width = width;
 
@@ -21,26 +21,12 @@ struct fractal *fractal_new(const char *name, int width, int height, double a, d
      fract->r = a;
      fract->c = b;
 
-  /* int * r= (int *)malloc(sizeof(int)*width*height);
-     if(r==NULL)
-     {
-       return NULL;
-     }
-     else{
-     fract->tab = r;
 
-   }*/
-
-
-     if(fract->tab==NULL)
-     {
-       return NULL;
-     }
 
 
      fract->moyenne=0;
 
-      return fract;
+    return fract;
 
 
 }
@@ -49,7 +35,7 @@ void fractal_free(struct fractal *f)
 {
     free(f->name);
     free(f->tab);
-    free(f); //Verifier si bien desalloue??
+    free(f); 
 }
 
 const char *fractal_get_name(const struct fractal *f)

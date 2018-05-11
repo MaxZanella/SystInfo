@@ -3,7 +3,7 @@
 
 struct fractal {
     /* TODO: à remplir */
-    char* name;  // A specifier 64??
+    char* name; 
     int width;
     int height;
     double r;
@@ -117,6 +117,5 @@ int fractal_compute_value(struct fractal *f, int x, int y);
  */
 int write_bitmap_sdl(const struct fractal *f, const char *fname);
 
-int iter_julia(double zx, double zy, double a,double  b, int it);
 
 #endif

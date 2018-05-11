@@ -1,0 +1,43 @@
+commit 3492fa21e7ed7b191c53ea0814a0b6cf50416fdd
+Author: MaxZanella <maxime.zanella@student.uclouvain.be>
+Date:   Fri May 11 13:22:55 2018 +0200
+
+    Version finale
+
+ Makefile             |   4 +
+ a.txt                |   5 +
+ b                    | Bin 54 -> 120054 bytes
+ b.bmp                | Bin 0 -> 795382 bytes
+ c.txt                |   1 +
+ fract1.bmp           | Bin 0 -> 1920054 bytes
+ fract3.bmp           | Bin 0 -> 795382 bytes
+ fract4.bmp           | Bin 0 -> 608454 bytes
+ fract5.bmp           | Bin 0 -> 3000054 bytes
+ fract6.bmp           | Bin 0 -> 1920054 bytes
+ libfractal/fractal.c |  50 ++--
+ libfractal/fractal.h |   2 +
+ main                 | Bin 35624 -> 37904 bytes
+ main.c               | 674 +++++++++++++++++++++++++++------------------------
+ 14 files changed, 393 insertions(+), 343 deletions(-)
+
+commit e38ef172aebfef19e354e7359df76272df630331
+Author: MaxZanella <maxime.zanella@student.uclouvain.be>
+Date:   Thu May 10 18:26:50 2018 +0200
+
+    initial commit
+
+ Makefile                |   7 +
+ a.txt                   |   1 +
+ b                       | Bin 0 -> 54 bytes
+ fileOutput              |   0
+ libfractal/Makefile     |  15 +
+ libfractal/fractal.c    | 111 ++++++++
+ libfractal/fractal.h    | 120 ++++++++
+ libfractal/fractal.o    | Bin 0 -> 6176 bytes
+ libfractal/libfractal.a | Bin 0 -> 18786 bytes
+ libfractal/tools.c      | 104 +++++++
+ libfractal/tools.o      | Bin 0 -> 12192 bytes
+ main                    | Bin 0 -> 35624 bytes
+ main.c                  | 721 ++++++++++++++++++++++++++++++++++++++++++++++++
+ tests/file.txt          |   1 +
+ 14 files changed, 1080 insertions(+)

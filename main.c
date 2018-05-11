@@ -32,7 +32,7 @@
 #define BMASK 0x00ff0000
 #define AMASK 0xff000000
 #endif
-//fin rajout bitmap
+
 
 /**** Declaration variable globale******/
 
@@ -41,7 +41,7 @@ int iter2=0; // compte le nbre de fractales retiree du buffer1
 int iter3=0; //compte le nbre de fractale calculee et ajoutee au buffer2
 int iter4=0;// compte le nbre de fractales  comparees
 char ** files;
-int NLECTEURS=0;
+int NLECTEURS=0; //nombre de threads de lecture
 
 int tous=0; //si fichier bmp pour chaque fractale (-d) : 1 oui 0 non
 
@@ -62,6 +62,7 @@ int count2=0; //pour connaitre le dernier element de buffer2
 
 
 /**** Methodes provoquant une segmentation fault -> refefinie ici****/
+
 int write_bitmap_sdl1(const struct fractal *f, const char *fname)
 {
 
@@ -150,6 +151,7 @@ int fractal_compute_value1(struct fractal *f, int x, int y)
     return val;
 }
 
+/*** en cas d'erreur***/
 
 void error(int err, char*msg)
 {
@@ -168,9 +170,14 @@ int openFile (char *filename)
   return file;
 }
 
+/*permet de lire une ligne et envoie la fractale correspondantes*/
 
 struct fractal *readLine(char* ligne) {
 
+  if(ligne[0]=='#')
+  {
+    return NULL;
+  }
     char * name = (char *)malloc(sizeof(char)*64);
     char * buf = (char *) malloc(sizeof(char)*64);
     if(buf==NULL)
@@ -195,23 +202,21 @@ struct fractal *readLine(char* ligne) {
     }
 
     strcpy(line,ligne);
-
-    for(int i=0;i<4;i++)
+    int i;
+    for(i=0;i<4;i++)
     {
 
       cursor = strstr(line," ");
 
        size=strlen(line)-strlen(cursor);
-        for(int j=0; j<size;j++)
+       int j;
+        for(j=0; j<size;j++)
         {
           buf[j]=line[j];
         }
         if(i==0)
         {
-          if(buf[0]=='#')
-          {
-            return NULL;
-          }
+
           strcpy(name,buf);
           strcpy(line,cursor+1);
 
@@ -253,16 +258,30 @@ struct fractal *readLine(char* ligne) {
         return NULL;
       }
 
+    fract = (struct fractal *) malloc(sizeof(struct fractal));
 
+       if(fract==NULL)
+       {
 
-      fract = fractal_new(name,width,height,r,c);
+         return NULL;
+
+       }
+
+    //  fract = fractal_new(name,width,height,r,c);
+    fract->name = name;
+    fract->width=width;
+    fract->height=height;
+    fract->r=r;
+    fract->c=c;
 
       int * p= (int *)malloc(sizeof(int)*(fract->width)*(fract->height));
+
       if(p==NULL)
       {
         return NULL;
       }
       else{
+
       fract->tab = p;
     }
 
@@ -270,12 +289,16 @@ struct fractal *readLine(char* ligne) {
     }
     char * setzero (char * concat, int size)
     {
-      for(int i=0;i<size;i++)
+      int k;
+      for(k=0;k<size;k++)
       {
-        concat[i]=0;
+        concat[k]=0;
       }
       return concat;
     }
+/*methode de lecture de fichier
+cree une ligne et la donne à readLine
+renvoie une fractale */
 
   struct fractal * readFile(int file)
   {
@@ -286,6 +309,7 @@ struct fractal *readLine(char* ligne) {
       return NULL;
     }
     int lect = read(file,buf,sizeof(char));
+
     struct fractal * fract=NULL;
 
     while(lect>0)
@@ -295,8 +319,8 @@ struct fractal *readLine(char* ligne) {
       {
       int newLine=0;
       int size =100;
-      char * concat = (char *)malloc(sizeof(char)*size);
-      concat = setzero(concat,size);
+      char * concat = (char *)malloc(sizeof(char)*size); //string qui va concaténer chaque caractère lu
+      concat = setzero(concat,size); //! remise à zero
       int length=0;
 
       if(concat==NULL)
@@ -312,13 +336,13 @@ struct fractal *readLine(char* ligne) {
         if(*buf=='\n')
         {
 
-          newLine=1;
+          newLine=1; //on a fini la ligne
         }
         else
         {
         concat[length]=*buf;
         length++;
-        printf("%s\n",concat);
+
         lect = read(file,buf,sizeof(char));
       }
 
@@ -366,7 +390,7 @@ void *producteur1(void * file)
 
     buffer1[count1]= fract; //ajout d'une fractale
     count1++;
-    iter1++;
+    iter1++;//une fractale ajoutée de plus
 
     pthread_mutex_unlock(&mutex1); //fin d'acces
     sem_post(&full1);  //un slot rempli en plus
@@ -387,10 +411,10 @@ void *producteur1(void * file)
         int boucle =0;
         while(boucle==0)
         {
-          if(iter1==iter4 && iter3==iter1)
+          if(iter1==iter4 && iter3==iter1) // on attend que les autres threads avancent
           {
 
-
+            sem_post(&empty2); //il y a un slot libre de plus
             boucle=1;
           }
         }
@@ -411,7 +435,7 @@ pthread_exit(NULL);
 }
 
 
-
+/*Lecture de la fractale en entrée standard*/
 void *entreestandard(void * ligne)
 {
     char * line = (char *) ligne;
@@ -451,6 +475,7 @@ void *entreestandard(void * ligne)
 pthread_exit(NULL);
 }
 
+/*Calucl de la fractal et de sa valeur moyenne*/
 void FractalCompute(struct fractal * f)
 {
 
@@ -460,11 +485,11 @@ void FractalCompute(struct fractal * f)
   int height = f->height;
 
   int val=0;
-
-  for(int i=0;i<width;i++)
+int i;
+  for(i=0;i<width;i++)
   {
-
-    for(int j=0; j<height;j++)
+int j;
+    for(j=0; j<height;j++)
     {
 
     val = val +  fractal_compute_value1(f, i, j); //met a jour directement
@@ -483,42 +508,35 @@ void *consommateur1(void * a)
 
   while(1==1)
   {
-    int fini=0;
+
     struct fractal * f;
     sem_wait(&full1); //attente d'un slot rempli
     pthread_mutex_lock(&mutex1); //acces au tableau et a la variable count1 et a iter2
-    if(NLECTEURS==0&&iter1==iter2&&iter1==iter3)
-    {
-      fini=1;
-    }
-    else
-    {
+
     f = buffer1[count1-1]; //retrait d'une fractale
     count1--;
 
     iter2++;//nbre  de fractale cree par le producteur 1;
-  }
+
     pthread_mutex_unlock(&mutex1); // fin d'acces
     sem_post(&empty1);
-; //il y a un slot libre de plus
-if(fini==0)
-{
+ //il y a un slot libre de plus
+
     FractalCompute(f);
-  }
+
 
 /******consommateur1 devient producteur2 ******/
-if(fini==0)
-{
+
       sem_wait(&empty2); // attente slot libre
       pthread_mutex_lock(&mutex2); // acces au buffer2 et a la variable count2
 
       buffer2[count2]= f; //ajout d'une fractale (calculee)
       count2++;
-      iter3++;
+      iter3++; //une fractael calculee de plus
 
       pthread_mutex_unlock(&mutex2); //fin d'acces
       sem_post(&full2);  //un slot rempli en plus
-    }
+
       if(NLECTEURS==0&&iter3==iter1)
       {
 
@@ -526,7 +544,7 @@ pthread_exit(NULL);
     }
   }
 }
-
+/*compare les 2 fractales et renvoient celle dont la  valeur moyenne est la plus elevee*/
 struct fractal * compareFractale(struct fractal * fractmax, struct fractal * f1)
 {
   if(fractmax->moyenne >= f1->moyenne)
@@ -563,16 +581,16 @@ void * consommateur2(void * a)
 
 
   int fini=0;
-  iter3=0; //nbre de fractales comparees -->utile pour condition d'arret??
+
   while(1)
   {
 
-    sem_wait(&full2); //attente d'un slot rempli
-    pthread_mutex_lock(&mutex2); //acces au buffer2 et a la variable count2
+    sem_wait(&full2);
+    pthread_mutex_lock(&mutex2);
     pthread_mutex_lock(&mutex1);
     if(NLECTEURS==0 && iter1==iter4)
     {
-      fini=1;
+      fini=1; //plus rien a comparer
       pthread_mutex_unlock(&mutex1);
     }
     else
@@ -595,7 +613,7 @@ void * consommateur2(void * a)
     }
   }
 }
-    pthread_mutex_unlock(&mutex1);
+    pthread_mutex_unlock(&mutex1);// fin d'acces
     pthread_mutex_unlock(&mutex2); // fin d'acces
     sem_post(&empty2); //il y a un slot libre de plus
 
@@ -607,7 +625,7 @@ void * consommateur2(void * a)
     }
     else
     {
-      if(tous==0)
+      if(tous==0) //un seul fichier bitmap
       {
         if(f->name==fractmax->name)
         {
@@ -616,21 +634,21 @@ void * consommateur2(void * a)
 
       fractmax = compareFractale(fractmax,f);
     }
-    else if(tous==1)
+    else if(tous==1) //un fichier bitmap par fractale
     {
       if(f->name==fractmax->name)
       {
         error(-1,"error au moins 2 fois le même nom de fractal : argument invalide");
       }
-printf("WRITE\n");
-    write_bitmap_sdl(f, strcat(f->name,".bmp"));
+
+    write_bitmap_sdl1(f, strcat(f->name,".bmp"));
     fractmax = compareFractale(fractmax,f);
   }
     }
     if(fini==1)
     {
-printf("WRITE\n");
-      write_bitmap_sdl(fractmax, strcat(a,".bmp"));
+
+      write_bitmap_sdl1(fractmax, strcat(a,".bmp"));
 
       free(buffer1);
       free(buffer2);
@@ -649,12 +667,13 @@ int main (int argc, char *argv[])
     files=(char **)malloc(sizeof(char *)*argc); //! dernier est le file de output
     int standard =0;  //1 si oui 0 si non
 
-    int NTHREADS = 4;  //A Definir NOMDRE DE THREADS de calcul --> ! limite
-    int maxthread=0;
+    int NTHREADS = 4;  //A Definir NOMDRE DE THREADS de calcul
+    int maxthread=0; //nbre de threads de calcul
     int err;
 
 /******* Lecture Arguments*****/
-    for(int i=1;i<argc;i++) //lis les arguments
+int i;
+    for(i=1;i<argc;i++) //lis les arguments
     {
 
       if(argv[i][0]=='-')
@@ -694,11 +713,10 @@ int main (int argc, char *argv[])
 
      NLECTEURS = (nbrefile) -1 + standard; //Nbre de threads de lecture de fichier --> = nbre de fichier a lire
 
-    int NbreSlot=2*( NTHREADS ); // A Definir NOMBRE DE SLOTS BUFFER --> 2*NThREADS
+    int NbreSlot=2*( NTHREADS ); // nbre de slots de chaque buffer
 
-    //tableau commun aux producteurs-consommateurs
 
-    buffer1 = (struct fractal **) malloc(sizeof(struct fractal*)*NbreSlot); //tableau commun aux producteurs-consommateurs
+    buffer1 = (struct fractal **) malloc(sizeof(struct fractal*)*NbreSlot); //tableau commun aux producteurs-consommateurs 1
 
     pthread_mutex_init(&mutex1,NULL); //Initialisation du mutex1
     sem_init(&empty1,0,NbreSlot); //buffer vide
@@ -708,16 +726,16 @@ int main (int argc, char *argv[])
 if(standard==1)
 {
     printf("Entrez une fractale valide format : nom largeur hauteur réel complexe, si vous ne souhaitez pas rentrer de fractal, tapez +\n");
-    fgets(ligne, sizeof(ligne), stdin);
+    fgets(ligne, sizeof(ligne), stdin); //lecture de l'entree standard
 }
+
     /*******Initialisation des threads de lecture (producteurs)******/
 
     pthread_t lecteurs[NLECTEURS];
-    for(int i=0;i<NLECTEURS-standard;i++)
+    int j;
+    for(j=0;j<NLECTEURS-standard;j++)
     {
-
-
-    err = pthread_create(&lecteurs[i], NULL,&producteur1,(void *) files[i]);
+    err = pthread_create(&lecteurs[j], NULL,&producteur1,(void *) files[j]);
     if(err!=0) //ERREUR
     { error(err,"erreur lorsque creation de thread de lecture");}
   }
@@ -732,10 +750,10 @@ if(standard==1)
  /*****Initialisation des threads de calcul (consommateurs)******/
 
     pthread_t threads[NTHREADS];
-
-    for(int i=0;i<NTHREADS;i++)
+int k;
+    for(k=0;k<NTHREADS;k++)
     {
-    err = pthread_create(&threads[i], NULL,&consommateur1, NULL);
+    err = pthread_create(&threads[k], NULL,&consommateur1, NULL);
     if(err!=0) //ERREUR
     { error(err,"erreur lorsque creation de thread de calcul");}
   }
@@ -743,8 +761,6 @@ if(standard==1)
 /***********************************************************************
                   Producteurs Consommateurs 2
 *************************************************************************/
-
-
 
 pthread_mutex_init(&mutex2,NULL); //Initialisation du mutex1
 sem_init(&empty2,0,NbreSlot); //buffer vide
