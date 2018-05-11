@@ -5,3 +5,7 @@ exec: main.c lib
 
 lib:
 	cd libfractal && $(MAKE)
+
+clean:
+	rm main
+	cd libfractal && $(MAKE) clean

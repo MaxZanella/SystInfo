@@ -12,34 +12,97 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 
+#include <stdint.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <fcntl.h>
+
+#include <SDL/SDL.h>
+
+#define itoc(x) ((0x00ffffff/MAX_ITER)*(x))
+#define MAX_ITER 4096
+#if SDL_BYTEORDER == SDL_BIG_ENDIAN
+#define RMASK 0xff000000
+#define GMASK 0x00ff0000
+#define BMASK 0x0000ff00
+#define AMASK 0x000000ff
+#else
+#define RMASK 0x000000ff
+#define GMASK 0x0000ff00
+#define BMASK 0x00ff0000
+#define AMASK 0xff000000
+#endif
+//fin rajout bitmap
+
 /**** Declaration variable globale******/
 
 int iter1=0; //compte le nbre de fractales crees
 int iter2=0; // compte le nbre de fractales retiree du buffer1
 int iter3=0; //compte le nbre de fractale calculee et ajoutee au buffer2
 int iter4=0;// compte le nbre de fractales  comparees
+char ** files;
 int NLECTEURS=0;
-int flag=0;
+
+int tous=0; //si fichier bmp pour chaque fractale (-d) : 1 oui 0 non
+
 /**Coordination Producteur-Consommateur (1)****/
 pthread_mutex_t mutex1;
 sem_t empty1;
-struct fractal * buffer1;
+struct fractal ** buffer1;
 sem_t full1;
 int count1 = 0; //endroit dans le buffer1 où se trouve la premiere case libre
 /**Coordination Producteur-Consommateur (2)*****/
 pthread_mutex_t mutex2;
 sem_t empty2;
-struct fractal * buffer2;
+struct fractal ** buffer2;
 sem_t full2;
 int count2=0; //pour connaitre le dernier element de buffer2
 
 /************************************************/
+
+
+/**** Methodes provoquant une segmentation fault -> refefinie ici****/
+int write_bitmap_sdl1(const struct fractal *f, const char *fname)
+{
+
+    SDL_Surface *back;
+    SDL_Rect pix;
+    int w, h, i, j, col;
+    uint32_t pcol, rcol, gcol, bcol;
+    w = f->width;
+    h = f->height;
+
+    back = SDL_CreateRGBSurface(SDL_SWSURFACE, w, h, 32, RMASK, GMASK, BMASK, AMASK);
+    if (!back)
+        return -1;
+
+    for (i = 0; i < w; i++) {
+        for (j = 0; j < h; j++) {
+            col = itoc(f->tab[(f->width)*j+i]);
+            rcol = col & 0xff;
+            gcol = (col >> 8) & 0xff;
+            bcol = (col >> 16) & 0xff;
+            pcol = SDL_MapRGB(back->format, rcol, gcol, bcol);
+
+            pix.w = pix.h = 1;
+            pix.x = i;
+            pix.y = j;
+            SDL_FillRect(back, &pix, pcol);
+        }
+    }
+
+    if (SDL_SaveBMP(back, fname) < 0)
+        return -1;
+
+    SDL_FreeSurface(back);
+
+    return 0;
+}
 void fractal_set_value1(struct fractal *f, int x, int y, int val)
 {
-  printf("SET VALUE\n");
-printf("%d %d\n",x,y);
+
   f->tab[f->width*y +x]=val;
-  printf("ALLOUE\n");
+
 }
 static int iter_julia1(double zx, double zy, double a, double b, int it)
 {
@@ -63,28 +126,27 @@ static int iter_julia1(double zx, double zy, double a, double b, int it)
 
 int fractal_compute_value1(struct fractal *f, int x, int y)
 {
-  printf("COMPUTE_VALUE\n");
+
     double zx, zy;
     double a, b;
     int val;
     int w, h;
-printf("COMPUTE_VALUE\n");
+
 
 
     a = fractal_get_a(f);
     b = fractal_get_b(f);
-printf("COMPUTE_VALUE\n");
+
     w = fractal_get_width(f);
     h = fractal_get_height(f);
-printf("COMPUTE_VALUE\n");
+
     zx = ((double)x / (double)w) * 3.0 - 1.5;
     zy = ((double)y / (double)h) * 3.0 - 1.5;
-printf("COMPUTE_VALUE\n");
+
     val = iter_julia1(zx, zy, a, b, 0);
-    printf("before set\n");
+
     fractal_set_value1(f, x, y, val);
-    printf("after set");
-printf("COMPUTE_VALUE");
+
     return val;
 }
 
@@ -99,7 +161,7 @@ void error(int err, char*msg)
 
 int openFile (char *filename)
 {
-  printf("%s\n",filename);
+
   int file = open((char *)filename,O_RDONLY);
   if(file!=0)
   error(file,"erreur lors d'ouverture d'un fichier");
@@ -108,74 +170,93 @@ int openFile (char *filename)
 
 
 struct fractal *readLine(char* ligne) {
-  printf("debut readLinelol, %s\n", ligne);
-    char name[65];
+
+    char * name = (char *)malloc(sizeof(char)*64);
+    char * buf = (char *) malloc(sizeof(char)*64);
+    if(buf==NULL)
+    {
+      return NULL;
+    }
     int width, height;
     double r, c;
-    int a=0;
 
     struct fractal * fract=NULL;
-    int i=0;
-    while(a<5)
-    {
-      printf("souci?\n");
-      char * concat = (char *)malloc(sizeof(char)*65);
-      printf("non\n");
-    while(i<strlen(ligne))
-    {
-      printf("%c",ligne[i]);
-      printf("1\n");
-      char z=ligne[i];
-      if(ligne[i]==' ')
-      {
 
-        if(a==0)
+    int size=0;
+    int err=0;
+
+    char * cursor;
+
+    char * line = (char *)malloc(sizeof(char)*100);
+    if(line==NULL)
+    {
+      free(buf);
+      return NULL;
+    }
+
+    strcpy(line,ligne);
+
+    for(int i=0;i<4;i++)
+    {
+
+      cursor = strstr(line," ");
+
+       size=strlen(line)-strlen(cursor);
+        for(int j=0; j<size;j++)
         {
-          strcpy(name,concat);
-          printf("%s\n",name);
-          a++;
+          buf[j]=line[j];
         }
-        if(a==1)
+        if(i==0)
         {
-          width = atoi(concat);
-          printf("YOUPI%d\n",width);
-          a++;
+          if(buf[0]=='#')
+          {
+            return NULL;
+          }
+          strcpy(name,buf);
+          strcpy(line,cursor+1);
+
         }
-        if(a==2)
+        else if(i==1)
         {
-          height = atoi(concat);
-          printf("HOURRA%d\n",height);
-          a++;
+          width = atoi(buf);
+          strcpy(line,cursor+1);
+
         }
-        if(a==3)
+        else if(i==2)
         {
-          r =atof(concat);
-          printf("%f\n",r);
-          a++;
+          height = atoi(buf);
+          strcpy(line,cursor+1);
+
         }
-        if(a==4)
+        else if(i==3)
         {
-          c=atof(concat);
-          printf("%f\n",c);
-          a++;
+
+          r=atof(buf);
+          strcpy(line,cursor+1);
+
         }
+        else if(i==4)
+        {
+          c=atof(buf);
+
+
+        }
+
       }
-      else
+      c=atof(line);
+
+
+      free(buf);
+      free(line);
+      if(err==1)
       {
-        printf("2\n");
-      strcat(concat,&z);
-      printf("%s\n",concat);
-      i++;
-      printf("4\n");
-    }
-    printf("5\n");
-    i++;
+        return NULL;
+      }
 
 
-    }
-  }
-      printf("fin de readline\n");
-      fract = fractal_new("fract",200,200,0.5,0.5);
+
+      fract = fractal_new(name,width,height,r,c);
+
       int * p= (int *)malloc(sizeof(int)*(fract->width)*(fract->height));
       if(p==NULL)
       {
@@ -185,48 +266,69 @@ struct fractal *readLine(char* ligne) {
       fract->tab = p;
     }
 
-
-      printf("READLINE : width ==== %d\n",fract->width);
-      printf("NOM FRACATAl %s\n",fractal_get_name(fract));
       return fract;
+    }
+    char * setzero (char * concat, int size)
+    {
+      for(int i=0;i<size;i++)
+      {
+        concat[i]=0;
+      }
+      return concat;
     }
 
   struct fractal * readFile(int file)
   {
-    printf("debut lecture\n");
+
     char * buf = (char *)malloc(sizeof(char));
+    if(buf==NULL)
+    {
+      return NULL;
+    }
     int lect = read(file,buf,sizeof(char));
     struct fractal * fract=NULL;
-    printf("avant boucle while\n");
+
     while(lect>0)
     {
-      printf("1\n");
+
       while(fract==NULL && lect>0)
-      {printf("1\n");
+      {
       int newLine=0;
-      char * concat = (char *)malloc(sizeof(char)*100);
-      printf("1\n");
+      int size =100;
+      char * concat = (char *)malloc(sizeof(char)*size);
+      concat = setzero(concat,size);
+      int length=0;
+
       if(concat==NULL)
       {
+
+        free(buf);
         return NULL;
       }
+
       while(newLine==0&&lect>0)
       {
-        printf("2");
+
         if(*buf=='\n')
         {
+
           newLine=1;
         }
         else
         {
-        strcat(concat, buf);
+        concat[length]=*buf;
+        length++;
         printf("%s\n",concat);
+        lect = read(file,buf,sizeof(char));
       }
-      lect = read(file,buf,sizeof(char));
+
       }
-      printf("avant readLine\n");
+
+
       fract = readLine(concat);
-      printf("readfile width = %d\n", fract->width);
+
+      free(concat);
+
     }
     if(fract != NULL)
     {
@@ -234,181 +336,71 @@ struct fractal *readLine(char* ligne) {
       return fract;
     }
     }
-    printf("lect est nul\n");
+
     free(buf);
   return NULL;
     }
 
-/*******Lecteur fichier*******/
-/*struct fractal * readFile (int file)
-{
-  int a; //chaine de caractere en cours de lecture (nom puis largeur etc...)
-  int err; // 0 = OK, 1 = recommence une ligne, 2 fin de ficher
-
-char * name;
-int height;
-int width;
-double reel;
-double complx;
-
-
-//lecture caractère par caractère
-
-char * buf = (char *)malloc(sizeof(char));
-int lect = read(file,buf,sizeof(char));
-int length =0;
-while(lect>0)
-{
-  a=0;
-  err=0;
-while(err==0)
-{
-  char * concat; //malloc ou pas et specifier la taille?
-while(*buf!='\0' && *buf!='\n' && *buf!=' ' && lect>0) //lecture caractere par caractere jusque espace
-{
-  strcat(concat, buf);
-  length++;
-  lect = read(file,buf,sizeof(char));
-}
-if(buf[length]==' ')
-{
-  a++; // on a un 'mot' en plus (d'abord le nom, puis la largeur etc.)
-  if(a==1)
-  {  //correspond au nom
-  name = concat;
-}
-  else if (a==2)  // correspond a la largeur
-  {
-  width = atoi(concat);
-
-}
-  else if(a==3)  // correspond a la longueur
-  {
-  int height = atoi(concat);
-}
-  else if (a==4)  // correspond au reel
-  {
-  double reel = atof(concat);
-}
-  else if (a==5)  // correspond au complexe
-  {
-  double complx = atof(concat);
-}
-  else if (a>5) //mauvais format d'entree, trop de mots
-  {
-    err=1;
-  }
-}
-else if(buf[length]=='\n')
-{
-  if(a==5)
-  {
-    free(buf);
-    struct fractal * fract = fractal_new(name, width, height, reel, complx);  // on cree la fractale qu'on va renvoyer
-
-    int tab[width][height]; //necessaire?
-    fract->tab = tab;
-    return fract;
-  }
-  else
-  {
-    err=1;
-  }
-}
-else if(buf[length]=='\0')
-{
-  if(a==5)
-  {
-    free(buf);
-    int cl = close(file);
-    if(cl!=0)
-    {
-       error(cl,"fermeture du fichier");
-    }
-    struct fractal * fract = fractal_new(name, width, height, reel, complx);
-    int tab[width][height]; //necessaire?
-    fract->tab = tab;
-    return fract;
-
-  }
-  else
-  {
-    free(buf);
-    return NULL;
-  }
-}
-}
-}
-  if(a==5)
-  {
-    free(buf);
-    int cl = close(file);
-    if(cl!=0)
-    {
-       error(cl,"fermeture du fichier");
-    }
-    struct fractal * fract = fractal_new(name, width, height, reel, complx);
-    int tab[width][height]; //necessaire?
-    fract->tab = tab;
-    return fract;
-
-  }
-  else
-  {
-    free(buf);
-    return NULL;
-  }
-
-return NULL;
-}
-*/
 
 /******Producteur1 *******/
 void *producteur1(void * file)
 {
+  int fd;
+  char * filename = (char *) file;
 
-  int * tete = (int *) file;
-  int fd = *tete;
-  printf("Entree producteur1\n");
-  printf("%d\n",fd);
- //ouvre le fichier et renvoie la tete de lecture
+  fd = open(filename,O_RDONLY);
+  if(fd<0)
+  {
+    error(fd,"erreur lors de l'ouverture d'un fichier");
+  }
+
   struct fractal * fract;
-  printf("lecture fractale\n");
-  fract = readFile(fd); // A definir -->correspond a la lecture et creation d'une structure fractale
-printf("fin de lecture fractale\n");
-printf("%d\n",fract->width);
+
+  fract = readFile(fd); // -->correspond a la lecture et creation d'une structure fractale
+
   while(fract != NULL)
   {
 
     sem_wait(&empty1); // attente slot libre
     pthread_mutex_lock(&mutex1); // acces au tableau et a la variable count1
 
-    buffer1[count1]= *fract; //ajout d'une fractale
+    buffer1[count1]= fract; //ajout d'une fractale
     count1++;
     iter1++;
-printf("fratale ajoutee\n");
+
     pthread_mutex_unlock(&mutex1); //fin d'acces
     sem_post(&full1);  //un slot rempli en plus
 
-    printf("%d, %d\n", count1, buffer1[0].width);
     fract = readFile(fd); // correspond a la lecture et creation d'une structure fractale
-    printf("NLECTEURS=%d\n",NLECTEURS);
+
     if(fract==NULL)
     {
-      printf("NLECTEURS=%d\n",NLECTEURS);
+
+
       pthread_mutex_lock(&mutex1);
 
       NLECTEURS--;
+
+      pthread_mutex_unlock(&mutex1);
       if(NLECTEURS==0)
       {
-      sem_post(&empty2); //il y a un slot libre de plus
+        int boucle =0;
+        while(boucle==0)
+        {
+          if(iter1==iter4 && iter3==iter1)
+          {
+
+
+            boucle=1;
+          }
+        }
+
     }
-      pthread_mutex_unlock(&mutex1);
     }
-    printf("NLECTEURS=%d\n",NLECTEURS);
+
 
 }
-printf("on sort de la lecture de fichier\n");
+
 
 int err = close(fd);
 if(err!=0)
@@ -418,65 +410,120 @@ if(err!=0)
 pthread_exit(NULL);
 }
 
+
+
+void *entreestandard(void * ligne)
+{
+    char * line = (char *) ligne;
+    struct fractal * fract;
+    if(line[0]!='+')
+    {
+    fract=readLine(line);
+    sem_wait(&empty1); // attente slot libre
+    pthread_mutex_lock(&mutex1); // acces au tableau et a la variable count1
+
+    buffer1[count1]= fract; //ajout d'une fractale
+    count1++;
+    iter1++;
+    pthread_mutex_unlock(&mutex1); //fin d'acces
+    sem_post(&full1);  //un slot rempli en plus
+}
+      pthread_mutex_lock(&mutex1);
+
+      NLECTEURS--;
+
+      pthread_mutex_unlock(&mutex1);
+      if(NLECTEURS==0)
+      {
+        int boucle =0;
+        while(boucle==0)
+        {
+          if(iter1==iter4 && iter3==iter1)
+          {
+            sem_post(&empty2);
+          }
+        }
+
+    }
+
+
+
+pthread_exit(NULL);
+}
+
 void FractalCompute(struct fractal * f)
 {
-  printf("DEBUT FRACTALE COMPUTE");
+
 
   int width = f->width;
-  printf("compute width = %d\n",f->width);
+
   int height = f->height;
-  printf("compute\n");
+
   int val=0;
-  printf("compute\n");
+
   for(int i=0;i<width;i++)
   {
-    printf("compute\n");
+
     for(int j=0; j<height;j++)
     {
-      printf("compute\n");
-      printf("CALCUL\n");
+
     val = val +  fractal_compute_value1(f, i, j); //met a jour directement
-    printf("val = %d\n",val);
+
     }
   }
-  printf("CALCUL VAL FINI\n");
+
   f->moyenne = (double) val/(width*height);
-  printf("ON ALLOUE MOYENNE, %f\n", f->moyenne);
+
 }
 
 /*******Consommateur1********/
 void *consommateur1(void * a)
 {
 
-printf("DEBUT CONSOMMATEUR1");
+
   while(1==1)
   {
+    int fini=0;
     struct fractal * f;
     sem_wait(&full1); //attente d'un slot rempli
     pthread_mutex_lock(&mutex1); //acces au tableau et a la variable count1 et a iter2
-    printf("ACCES AU TABLEAU CONSO 1\n");
-    f = &buffer1[count1-1]; //retrait d'une fractale
+    if(NLECTEURS==0&&iter1==iter2&&iter1==iter3)
+    {
+      fini=1;
+    }
+    else
+    {
+    f = buffer1[count1-1]; //retrait d'une fractale
     count1--;
-    printf("LA WIDTH FRACTALE VAUT %d\n",f->width);
-    iter2++;//nbre  de fractale cree par le producteur 1;
-    pthread_mutex_unlock(&mutex1); // fin d'acces
-    sem_post(&empty1); //il y a un slot libre de plus
-    printf("la  valeur de width est %d\n", f->width);
-    printf("count1, %d\n",count1);
-    FractalCompute(f);
-    
-printf("apres calcul fractal\n");
-/******consommateur1 devient producteur2 ******/
 
+    iter2++;//nbre  de fractale cree par le producteur 1;
+  }
+    pthread_mutex_unlock(&mutex1); // fin d'acces
+    sem_post(&empty1);
+; //il y a un slot libre de plus
+if(fini==0)
+{
+    FractalCompute(f);
+  }
+
+/******consommateur1 devient producteur2 ******/
+if(fini==0)
+{
       sem_wait(&empty2); // attente slot libre
       pthread_mutex_lock(&mutex2); // acces au buffer2 et a la variable count2
 
-      buffer2[count2]= *f; //ajout d'une fractale (calculee)
+      buffer2[count2]= f; //ajout d'une fractale (calculee)
       count2++;
       iter3++;
-      printf("Ajout fractal calculee");
+
       pthread_mutex_unlock(&mutex2); //fin d'acces
       sem_post(&full2);  //un slot rempli en plus
+    }
+      if(NLECTEURS==0&&iter3==iter1)
+      {
+
+pthread_exit(NULL);
+    }
   }
 }
 
@@ -484,21 +531,24 @@ struct fractal * compareFractale(struct fractal * fractmax, struct fractal * f1)
 {
   if(fractmax->moyenne >= f1->moyenne)
   {
-    free(f1);
+    fractal_free(f1);
     return fractmax;
   }
   else
   {
-    free(fractmax);
+    fractal_free(fractmax);
     return f1;
   }
 }
+
+
 
 /***** Consommateur2 ----> Comparateur de fractales*****/
 
 void * consommateur2(void * a)
 {
-  printf("DEBUT CONSOMMATEUR 2\n");
+
+
   struct fractal * f = (struct fractal *)malloc(sizeof(struct fractal));
   if(f==NULL)
   {
@@ -507,16 +557,16 @@ void * consommateur2(void * a)
   struct fractal * fractmax = (struct fractal *)malloc(sizeof(struct fractal));
   if(fractmax==NULL)
   {
-    free(f);
+    fractal_free(f);
     return NULL;
   }
 
-  char * fileOut = (char *) a;
+
   int fini=0;
   iter3=0; //nbre de fractales comparees -->utile pour condition d'arret??
   while(1)
   {
-    printf("conmparateur attend...\n");
+
     sem_wait(&full2); //attente d'un slot rempli
     pthread_mutex_lock(&mutex2); //acces au buffer2 et a la variable count2
     pthread_mutex_lock(&mutex1);
@@ -529,17 +579,18 @@ void * consommateur2(void * a)
     {
 
     pthread_mutex_unlock(&mutex1);
-    f = &buffer2[count2-1]; //retrait d'une fractale
+    f = buffer2[count2-1]; //retrait d'une fractale
     count2--;
     iter4++;
-    printf("ET UNE DE PLUS A COMPARER...\n");
+
     pthread_mutex_lock(&mutex1);
-    printf("iter 3 = %d, iter 1 = %d", iter3, iter1);
+
+
     if(iter4==iter1)
     {
       if(NLECTEURS==0||(iter3==iter4 && count1==0 && iter2==iter3 &&count2==0))
       {
-      printf("FINI YOUPI\n");
+
       fini=1;
     }
   }
@@ -547,71 +598,65 @@ void * consommateur2(void * a)
     pthread_mutex_unlock(&mutex1);
     pthread_mutex_unlock(&mutex2); // fin d'acces
     sem_post(&empty2); //il y a un slot libre de plus
-    printf("COmparateur sort du sémaphore\n");
-    if(iter3==1)
+
+
+    if(iter4==1)
     {
       *fractmax = *f;
+
     }
     else
     {
+      if(tous==0)
+      {
+        if(f->name==fractmax->name)
+        {
+          error(-1,"error au moins 2 fois le même nom de fractal : argument invalide");
+        }
+
       fractmax = compareFractale(fractmax,f);
+    }
+    else if(tous==1)
+    {
+      if(f->name==fractmax->name)
+      {
+        error(-1,"error au moins 2 fois le même nom de fractal : argument invalide");
+      }
+printf("WRITE\n");
+    write_bitmap_sdl(f, strcat(f->name,".bmp"));
+    fractmax = compareFractale(fractmax,f);
+  }
     }
     if(fini==1)
     {
-      printf("DEBUT ECRITURE FICHER BITMAP\n");
-      write_bitmap_sdl(fractmax, a);
-      printf("FIN ECRITURE FICHIER BITMAP\n");
+printf("WRITE\n");
+      write_bitmap_sdl(fractmax, strcat(a,".bmp"));
+
+      free(buffer1);
+      free(buffer2);
+      fractal_free(fractmax);
       return (void *) a;
     }
   }
 
 }
 
-/******* Lecture Arguments*****/
-/*void readArg(int * nbrethreads,int * tous,int * nbre, int * entree, char** fichier, int argc, char**argv)
-{
-  for(int i=1;i<argc;i++)
-  {
-    if(argv[i][0]=='-')
-    {
-      if(argv[i][1]=='-')
-      {
-        *nbrethreads = atoi(argv[i][13]);
-      }
-      else if(argv[i][1]=='d')
-      {
-        *tous=1;
-      }
-      else if(argv[i][1]=='\0')
-      {
-        *entree=1;
-      }
-    }
-    else
-    {
-      strcpy(fichier[*nbre],argv[i]);
-      *nbre = *nbre +1;
-    }
-}
-}*/
-/********Ouverture de fichier********/
-
-
 int main (int argc, char *argv[])
 {
-    printf("1\n");
+
     /* TODO */
     int nbrefile =0; //nbre de file a lire +1 (output)
-    char * files[argc]; //! dernier est le file de output
-    int stdin =0;  //1 si oui 0 si non
-    int tous=0; //si fichier bmp pour chaque fractale (-d) : 1 oui 0 non
+    files=(char **)malloc(sizeof(char *)*argc); //! dernier est le file de output
+    int standard =0;  //1 si oui 0 si non
+
     int NTHREADS = 4;  //A Definir NOMDRE DE THREADS de calcul --> ! limite
     int maxthread=0;
     int err;
-printf("2\n");
+
+/******* Lecture Arguments*****/
     for(int i=1;i<argc;i++) //lis les arguments
     {
-      printf("rentre\n");
+
       if(argv[i][0]=='-')
       {
         if(argv[i][1]=='-')
@@ -626,62 +671,63 @@ printf("2\n");
         }
         else if(argv[i][1]=='\0')
         {
-          stdin=1;
+          standard=1;
         }
       }
       else
       {
-        printf("rentre2\n");
+
         int length = strlen(argv[i]);
         char * r = (char *)malloc(sizeof(char)*(length+1));
         strcpy(r,argv[i]);
         files[nbrefile]=r;
 
-        printf("%s\n",files[nbrefile]);
+
         nbrefile++;
 
       }
   }
 
-  printf("3\n");
-
     /***********************************************************
                     producteurs-consommateurs 1
     ****************************************************************/
 
-     NLECTEURS = (nbrefile) -1; //Nbre de threads de lecture de fichier --> = nbre de fichier a lire
-flag =NLECTEURS;
+     NLECTEURS = (nbrefile) -1 + standard; //Nbre de threads de lecture de fichier --> = nbre de fichier a lire
+
     int NbreSlot=2*( NTHREADS ); // A Definir NOMBRE DE SLOTS BUFFER --> 2*NThREADS
 
     //tableau commun aux producteurs-consommateurs
 
-    buffer1 = (struct fractal *) malloc(sizeof(struct fractal)*NbreSlot); //tableau commun aux producteurs-consommateurs
+    buffer1 = (struct fractal **) malloc(sizeof(struct fractal*)*NbreSlot); //tableau commun aux producteurs-consommateurs
 
     pthread_mutex_init(&mutex1,NULL); //Initialisation du mutex1
     sem_init(&empty1,0,NbreSlot); //buffer vide
     sem_init(&full1,0, 0); //buffer vide
 
-
-    /*******Initialisation des threads de lecture (producteurs)******/
-printf("hello\n");
-    pthread_t lecteurs[NLECTEURS];
-    for(int i=0;i<NLECTEURS;i++)
-    {
-      printf("max\n");
-printf("max\n");
-int fd = open(files[i],O_RDONLY);
-printf("max\n");
-
-if(fd<=0)
+    char ligne[100];
+if(standard==1)
 {
-error(fd,"erreur lors d'ouverture d'un fichier");
+    printf("Entrez une fractale valide format : nom largeur hauteur réel complexe, si vous ne souhaitez pas rentrer de fractal, tapez +\n");
+    fgets(ligne, sizeof(ligne), stdin);
 }
-printf("max\n");
-printf("%d\n",fd);
-    err = pthread_create(&lecteurs[i], NULL,&producteur1,(void *) &fd);
+    /*******Initialisation des threads de lecture (producteurs)******/
+
+    pthread_t lecteurs[NLECTEURS];
+    for(int i=0;i<NLECTEURS-standard;i++)
+    {
+
+
+    err = pthread_create(&lecteurs[i], NULL,&producteur1,(void *) files[i]);
     if(err!=0) //ERREUR
     { error(err,"erreur lorsque creation de thread de lecture");}
   }
+  if(standard==1)
+  {
+    err = pthread_create(&lecteurs[NLECTEURS], NULL,&entreestandard,(void *)ligne);
+    if(err!=0) //ERREUR
+    { error(err,"erreur lors de creation du thread de lecture de l'entree standard");}
+  }
+
 
  /*****Initialisation des threads de calcul (consommateurs)******/
 
@@ -704,7 +750,7 @@ pthread_mutex_init(&mutex2,NULL); //Initialisation du mutex1
 sem_init(&empty2,0,NbreSlot); //buffer vide
 sem_init(&full2,0, 0); //buffer vide
 // buffer contenant les fractales calculees
-buffer2 =(struct fractal *)malloc(sizeof(struct fractal)*NbreSlot);
+buffer2 =(struct fractal **)malloc(sizeof(struct fractal *)*NbreSlot);
 
 
 /******** Initialisation du thread de comparaison *******/
@@ -712,10 +758,14 @@ buffer2 =(struct fractal *)malloc(sizeof(struct fractal)*NbreSlot);
 pthread_t threadcmp;
 char * fileOut;
 fileOut = files[nbrefile -1];
+
 err = pthread_create(&threadcmp,NULL,&consommateur2, (void *)fileOut);
 if(err!=0)
   {error(err,"erreur lorsque creation du thread de comparaion");} // ERREUR
+
+
 int *r;
 pthread_join(threadcmp, (void **)&r);
+free(files);
 return 0;
 }
